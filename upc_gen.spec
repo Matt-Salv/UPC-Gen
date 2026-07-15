@@ -1,5 +1,9 @@
-import sys
+import sys, os
 from PyInstaller.utils.hooks import collect_all
+
+icon_file = (
+    'assets/icon.icns' if sys.platform == 'darwin' else 'assets/icon.ico'
+)
 
 openpyxl_datas, openpyxl_binaries, openpyxl_hiddenimports = collect_all('openpyxl')
 
@@ -7,7 +11,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=openpyxl_binaries,
-    datas=[('fonts/arial.ttf', 'fonts')] + openpyxl_datas,
+    datas=[('fonts/arial.ttf', 'fonts'), ('assets/icon.png', 'assets')] + openpyxl_datas,
     hiddenimports=[
         'barcode.upc',
         'barcode.codex',
@@ -34,6 +38,7 @@ if sys.platform == 'darwin':
         upx=True,
         console=False,
         argv_emulation=False,
+        icon=icon_file,
     )
     coll = COLLECT(
         exe,
@@ -48,6 +53,7 @@ if sys.platform == 'darwin':
         coll,
         name='UPCGen.app',
         bundle_identifier='com.rasterlab.upcgen',
+        icon=icon_file,
         info_plist={
             'NSHighResolutionCapable': True,
             'LSMinimumSystemVersion': '10.13.0',
@@ -70,4 +76,5 @@ else:
         upx_exclude=[],
         runtime_tmpdir=None,
         console=False,
+        icon=icon_file,
     )

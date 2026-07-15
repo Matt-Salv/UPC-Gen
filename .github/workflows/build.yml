@@ -39,6 +39,18 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt pyinstaller
 
+      - name: Build Mac icon (icns)
+        run: |
+          mkdir -p iconset.iconset
+          for size in 16 32 128 256 512; do
+            sips -z $size $size assets/icon.png --out iconset.iconset/icon_${size}x${size}.png
+          done
+          sips -z 32  32  assets/icon.png --out iconset.iconset/icon_16x16@2x.png
+          sips -z 64  64  assets/icon.png --out iconset.iconset/icon_32x32@2x.png
+          sips -z 256 256 assets/icon.png --out iconset.iconset/icon_128x128@2x.png
+          sips -z 512 512 assets/icon.png --out iconset.iconset/icon_256x256@2x.png
+          iconutil -c icns iconset.iconset -o assets/icon.icns
+
       - name: Build Mac app
         run: pyinstaller upc_gen.spec
 

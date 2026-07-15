@@ -46,6 +46,14 @@ def _smoke_test():
         sys.exit(1)
 
 
+def _app_icon():
+    import os
+    from PySide6.QtGui import QIcon
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(base, 'assets', 'icon.png')
+    return QIcon(path) if os.path.isfile(path) else QIcon()
+
+
 def main():
     if "--smoke-test" in sys.argv:
         _smoke_test()
@@ -58,6 +66,7 @@ def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(APP_STYLESHEET)
     app.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    app.setWindowIcon(_app_icon())
 
     window = MainWindow()
     window.show()

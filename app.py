@@ -731,8 +731,16 @@ class MainWindow(QMainWindow):
             if not codes:
                 QMessageBox.warning(self, "No codes", "Paste at least one UPC code.")
                 return None
+            from generator import validate_upc
             ext = FORMAT_EXTENSIONS[self._format_combo.currentData()]
-            return [(code, out_folder / f"{code}{ext}") for code in codes]
+            jobs = []
+            for code in codes:
+                try:
+                    fname = validate_upc(code)   # normalized 12-digit UPC
+                except ValueError:
+                    fname = code                 # invalid — worker will catch and report
+                jobs.append((code, out_folder / f"{fname}{ext}"))
+            return jobs
 
         else:
             if not self._spreadsheet_path or not self._spreadsheet_path.is_file():
