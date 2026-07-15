@@ -514,7 +514,7 @@ class MainWindow(QMainWindow):
         folder_row.addWidget(browse_btn)
         form.addRow("Folder:", folder_row)
 
-        hint = QLabel("Images saved as  {upc}.jpg  — 707 × 313 px, 300 DPI")
+        hint = QLabel("Files named {upc}.ext — format and resolution set in Settings")
         hint.setStyleSheet("color: #888888; font-size: 9pt;")
         form.addRow("", hint)
 
