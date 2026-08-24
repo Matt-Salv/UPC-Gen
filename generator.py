@@ -93,7 +93,7 @@ def _build_raster_image(upc: str, dpi: int, bar_height_pct: int):
     text_y      = round(_TEXT_Y      * dpi_s * h_s)
     font_px     = round(_FONT_PX     * dpi_s * h_s)
     left_x      = round(11           * dpi_s)
-    right_x     = round(706          * dpi_s)
+    right_x     = round(695          * dpi_s)
 
     pattern = bc.get("upca", upc[:11]).build()[0]
     guard_mods = _guard_mods_for(pattern)
@@ -168,7 +168,7 @@ def _generate_eps(upc: str, output_path: Path, bar_height_pct: int) -> None:
 
     # Horizontal text anchors (x only; widths scale with DPI, not bar height)
     left_x_pt  = 11  * P
-    right_x_pt = 706 * P
+    right_x_pt = 695 * P
     mfr_x_pt   = (_QZ_PX + 28 * _MH_PX) * P
     prod_x_pt  = (_QZ_PX + 67 * _MH_PX) * P
 

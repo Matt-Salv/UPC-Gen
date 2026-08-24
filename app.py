@@ -27,10 +27,10 @@ def _version_gt(a: str, b: str) -> bool:
 
 
 class UpdateChecker(QThread):
-    update_available = Signal(str, str)  # version, release_url
+    update_available = Signal(str, str, str)  # version, html_url, download_url
 
     def run(self):
-        import urllib.request, json
+        import urllib.request, json, sys
         try:
             url = f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest"
             req = urllib.request.Request(url, headers={"User-Agent": "UPCGen-App"})
@@ -38,10 +38,119 @@ class UpdateChecker(QThread):
                 data = json.loads(resp.read())
             tag = data.get("tag_name", "").lstrip("v")
             html_url = data.get("html_url", "")
+            suffix = ".zip" if sys.platform == "darwin" else ".exe"
+            download_url = next(
+                (a["browser_download_url"] for a in data.get("assets", [])
+                 if a["name"].endswith(suffix)),
+                "",
+            )
             if tag and _version_gt(tag, APP_VERSION):
-                self.update_available.emit(tag, html_url)
+                self.update_available.emit(tag, html_url, download_url)
         except Exception:
             pass
+
+
+class UpdateInstaller(QThread):
+    progress = Signal(int, str)  # percent, label
+    error    = Signal(str)       # message — caller falls back to browser
+
+    def __init__(self, download_url: str, parent=None):
+        super().__init__(parent)
+        self._url = download_url
+
+    def run(self):
+        import sys, os, tempfile, subprocess, urllib.request, zipfile
+        from pathlib import Path
+
+        if not getattr(sys, "frozen", False):
+            self.error.emit("dev-mode")
+            return
+
+        try:
+            suffix = ".zip" if sys.platform == "darwin" else ".exe"
+            tmp_file = Path(tempfile.mktemp(suffix=suffix))
+
+            def _hook(count, block, total):
+                if total > 0:
+                    pct = min(90, int(count * block * 90 / total))
+                    self.progress.emit(pct, f"Downloading… {pct}%")
+
+            self.progress.emit(0, "Downloading update…")
+            urllib.request.urlretrieve(self._url, str(tmp_file), _hook)
+            self.progress.emit(93, "Preparing…")
+
+            if sys.platform == "darwin":
+                self._install_mac(tmp_file)
+            else:
+                self._install_windows(tmp_file)
+
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+    def _install_mac(self, zip_path):
+        import sys, os, subprocess, tempfile, zipfile
+        from pathlib import Path
+
+        exe = Path(sys.executable)
+        current_app = exe.parent.parent.parent  # …/UPCGen.app
+        tmp_dir = Path(tempfile.mkdtemp(prefix="upcgen_upd_"))
+
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(tmp_dir)
+
+        apps = list(tmp_dir.glob("*.app"))
+        if not apps:
+            raise RuntimeError("No .app found in downloaded zip")
+        new_app = apps[0]
+
+        pid = os.getpid()
+        script = (
+            f"#!/bin/bash\n"
+            f"while kill -0 {pid} 2>/dev/null; do sleep 0.3; done\n"
+            f'rm -rf "{current_app}"\n'
+            f'mv "{new_app}" "{current_app}"\n'
+            f'xattr -cr "{current_app}" 2>/dev/null || true\n'
+            f'open "{current_app}"\n'
+            f'rm -rf "{tmp_dir}"\n'
+            f'rm -f "$0"\n'
+        )
+        script_path = Path(tempfile.mktemp(suffix=".sh"))
+        script_path.write_text(script)
+        script_path.chmod(0o755)
+        subprocess.Popen([str(script_path)], close_fds=True, start_new_session=True)
+
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance().quit()
+
+    def _install_windows(self, new_exe_path):
+        import sys, os, subprocess, tempfile
+        from pathlib import Path
+
+        current_exe = Path(sys.executable)
+        pid = os.getpid()
+
+        bat = (
+            "@echo off\n"
+            ":wait\n"
+            f'tasklist /FI "PID eq {pid}" 2>NUL | find /I " {pid} " >NUL\n'
+            "if not errorlevel 1 (\n"
+            "    timeout /t 1 /nobreak >NUL\n"
+            "    goto wait\n"
+            ")\n"
+            f'move /Y "{new_exe_path}" "{current_exe}"\n'
+            f'start "" "{current_exe}"\n'
+            'del "%~f0"\n'
+        )
+        bat_path = Path(tempfile.mktemp(suffix=".bat"))
+        bat_path.write_text(bat)
+        subprocess.Popen(
+            ["cmd", "/c", str(bat_path)],
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+            close_fds=True,
+        )
+
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance().quit()
 
 
 class SkippedUpcsDialog(QDialog):
@@ -158,9 +267,11 @@ class MainWindow(QMainWindow):
         self._worker: GenerateWorker | None = None
         self._sheet_loader: SheetColumnLoader | None = None
         self._update_checker: UpdateChecker | None = None
+        self._update_installer: UpdateInstaller | None = None
         self._spreadsheet_path: Path | None = None
         self._col_select_upc: str = ""
         self._update_url: str = ""
+        self._update_download_url: str = ""
         self._setup_ui()
         self._load_settings()
         self._schedule_update_check()
@@ -182,19 +293,34 @@ class MainWindow(QMainWindow):
         self._update_bar.setStyleSheet(
             "QFrame { background-color: #1a4a82; border: none; }"
         )
-        bar_row = QHBoxLayout(self._update_bar)
-        bar_row.setContentsMargins(12, 6, 8, 6)
-        self._update_bar_label = QLabel()
-        self._update_bar_label.setStyleSheet(
-            "color: #ffffff; font-size: 9pt; background: transparent;"
-        )
-        self._update_download_btn = QPushButton("Download")
-        self._update_download_btn.setStyleSheet(
+        _btn_style = (
             "QPushButton { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.35); "
             "color: white; padding: 2px 10px; font-size: 9pt; border-radius: 3px; }"
             "QPushButton:hover { background: rgba(255,255,255,0.28); }"
+            "QPushButton:disabled { color: rgba(255,255,255,0.4); border-color: rgba(255,255,255,0.15); }"
         )
+        _lbl_style = "color: #ffffff; font-size: 9pt; background: transparent;"
+        bar_row = QHBoxLayout(self._update_bar)
+        bar_row.setContentsMargins(12, 6, 8, 6)
+        self._update_bar_label = QLabel()
+        self._update_bar_label.setStyleSheet(_lbl_style)
+        self._update_install_btn = QPushButton("Install & Restart")
+        self._update_install_btn.setStyleSheet(_btn_style)
+        self._update_install_btn.clicked.connect(self._on_install_update)
+        self._update_download_btn = QPushButton("Download")
+        self._update_download_btn.setStyleSheet(_btn_style)
         self._update_download_btn.clicked.connect(self._on_update_download)
+        self._update_progress = QProgressBar()
+        self._update_progress.setFixedWidth(160)
+        self._update_progress.setFixedHeight(16)
+        self._update_progress.setRange(0, 100)
+        self._update_progress.setTextVisible(False)
+        self._update_progress.setStyleSheet(
+            "QProgressBar { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); "
+            "border-radius: 3px; }"
+            "QProgressBar::chunk { background: #4fa3e0; border-radius: 2px; }"
+        )
+        self._update_progress.setVisible(False)
         _dismiss = QPushButton("✕")
         _dismiss.setFixedWidth(28)
         _dismiss.setStyleSheet(
@@ -205,6 +331,8 @@ class MainWindow(QMainWindow):
         _dismiss.clicked.connect(self._update_bar.hide)
         bar_row.addWidget(self._update_bar_label)
         bar_row.addStretch()
+        bar_row.addWidget(self._update_progress)
+        bar_row.addWidget(self._update_install_btn)
         bar_row.addWidget(self._update_download_btn)
         bar_row.addWidget(_dismiss)
         self._update_bar.setVisible(False)
@@ -826,12 +954,42 @@ class MainWindow(QMainWindow):
         self._update_checker.update_available.connect(self._on_update_available)
         self._update_checker.start()
 
-    def _on_update_available(self, version: str, url: str):
+    def _on_update_available(self, version: str, url: str, download_url: str):
+        import sys
         self._update_url = url
+        self._update_download_url = download_url
         self._update_bar_label.setText(
             f"UPC Gen v{version} is available — you're on v{APP_VERSION}."
         )
+        can_self_install = bool(download_url) and getattr(sys, "frozen", False)
+        self._update_install_btn.setVisible(can_self_install)
+        self._update_download_btn.setVisible(not can_self_install)
         self._update_bar.setVisible(True)
+
+    def _on_install_update(self):
+        self._update_install_btn.setEnabled(False)
+        self._update_progress.setValue(0)
+        self._update_progress.setVisible(True)
+        self._update_bar_label.setText("Installing update…")
+
+        self._update_installer = UpdateInstaller(self._update_download_url, self)
+        self._update_installer.progress.connect(self._on_install_progress)
+        self._update_installer.error.connect(self._on_install_error)
+        self._update_installer.start()
+
+    def _on_install_progress(self, pct: int, label: str):
+        self._update_progress.setValue(pct)
+        self._update_bar_label.setText(label)
+
+    def _on_install_error(self, msg: str):
+        self._update_progress.setVisible(False)
+        self._update_install_btn.setVisible(False)
+        self._update_download_btn.setVisible(True)
+        self._update_bar_label.setText(
+            "Auto-install failed — click Download to update manually."
+        )
+        if self._update_url:
+            QDesktopServices.openUrl(QUrl(self._update_url))
 
     def _on_update_download(self):
         if self._update_url:
