@@ -472,6 +472,26 @@ class MainWindow(QMainWindow):
         self._preview_panel.setVisible(False)
         layout.addWidget(self._preview_panel)
 
+        # About / Updates group
+        about_group = QGroupBox("About")
+        about_form = QFormLayout(about_group)
+        about_form.setSpacing(10)
+        about_form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        about_form.addRow("Version:", QLabel(f"UPC Gen v{APP_VERSION}"))
+
+        update_row = QHBoxLayout()
+        self._check_update_btn = QPushButton("Check for Updates")
+        self._check_update_btn.setFixedWidth(160)
+        self._check_update_btn.clicked.connect(self._on_manual_update_check)
+        self._update_status_label = QLabel("")
+        self._update_status_label.setStyleSheet("color: #888888; font-size: 9pt;")
+        update_row.addWidget(self._check_update_btn)
+        update_row.addWidget(self._update_status_label)
+        update_row.addStretch()
+        about_form.addRow("", update_row)
+
+        layout.addWidget(about_group)
         layout.addStretch()
 
         self._update_dims_label()
@@ -965,6 +985,25 @@ class MainWindow(QMainWindow):
         self._update_install_btn.setVisible(can_self_install)
         self._update_download_btn.setVisible(not can_self_install)
         self._update_bar.setVisible(True)
+        self._check_update_btn.setEnabled(True)
+        self._update_status_label.setText(f"v{version} available!")
+        self._update_status_label.setStyleSheet("color: #4fa3e0; font-size: 9pt; font-weight: bold;")
+
+    def _on_manual_update_check(self):
+        self._check_update_btn.setEnabled(False)
+        self._update_status_label.setStyleSheet("color: #888888; font-size: 9pt;")
+        self._update_status_label.setText("Checking…")
+        checker = UpdateChecker(self)
+        checker.update_available.connect(self._on_update_available)
+        checker.finished.connect(lambda: self._on_manual_check_done(checker))
+        self._update_checker = checker
+        checker.start()
+
+    def _on_manual_check_done(self, checker: "UpdateChecker"):
+        # update_available fires first if an update was found, setting "available!" in the label
+        if "available" not in self._update_status_label.text():
+            self._update_status_label.setText("You're up to date.")
+        self._check_update_btn.setEnabled(True)
 
     def _on_install_update(self):
         self._update_install_btn.setEnabled(False)

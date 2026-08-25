@@ -1,5 +1,5 @@
 APP_NAME = "UPC Gen"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.3"
 
 DEFAULT_DPI        = 300    # default raster resolution — 707×313 px, matches tec-it.com output
 DEFAULT_QUALITY    = 95     # default JPEG quality
