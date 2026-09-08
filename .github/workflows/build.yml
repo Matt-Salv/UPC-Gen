@@ -52,7 +52,7 @@ jobs:
           iconutil -c icns iconset.iconset -o assets/icon.icns
 
       - name: Build Mac app
-        run: pyinstaller upc_gen.spec
+        run: pyinstaller --target-arch universal2 upc_gen.spec
 
       - name: Smoke test
         run: dist/UPCGen.app/Contents/MacOS/UPCGen --smoke-test
